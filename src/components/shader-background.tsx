@@ -40,13 +40,13 @@ float fbm(vec2 p) {
 void main() {
   vec2 uv = vUv;
   uv.x *= uResolution.x / uResolution.y;
-  float t = uTime * 0.035;
+  float t = uTime * 0.04;
   float n = fbm(uv * 1.3 + vec2(t, -t * 0.7));
   float m = fbm(uv * 2.0 - vec2(t * 0.6, t) + n * 1.6);
-  vec3 tint = mix(uColorA, uColorB, smoothstep(0.25, 0.75, m));
-  float vignette = smoothstep(1.3, 0.15, length(vUv - 0.5) * 1.5);
-  float k = (0.3 + 0.7 * n) * vignette * uStrength;
-  vec3 base = vec3(0.027, 0.027, 0.035);
+  vec3 tint = mix(uColorA, uColorB, smoothstep(0.2, 0.8, m));
+  float vignette = smoothstep(1.35, 0.1, length(vUv - vec2(0.62, 0.42)) * 1.35);
+  float k = (0.35 + 0.65 * n) * vignette * uStrength;
+  vec3 base = vec3(0.027, 0.027, 0.038);
   gl_FragColor = vec4(mix(base, tint, k), 1.0);
 }
 `;
@@ -58,8 +58,9 @@ uniform mat4 projectionMatrix;
 varying float vDepth;
 void main() {
   vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
-  vDepth = clamp((-mvPos.z - 2.2) / 3.4, 0.0, 1.0);
+  vDepth = clamp((-mvPos.z - 3.3) / 3.4, 0.0, 1.0);
   gl_Position = projectionMatrix * mvPos;
+  gl_PointSize = mix(4.5, 2.0, vDepth);
 }
 `;
 
@@ -69,13 +70,28 @@ uniform vec3 uColor;
 uniform float uAlpha;
 varying float vDepth;
 void main() {
-  float fade = mix(1.0, 0.22, vDepth);
+  float fade = mix(1.0, 0.3, vDepth);
   gl_FragColor = vec4(uColor, uAlpha * fade);
 }
 `;
 
-/** Generates wireframe edges for a subdivided icosahedron / geodesic sphere. */
-function createGeodesicWireframe(radius: number): Float32Array {
+const POINT_FRAGMENT = /* glsl */ `
+precision mediump float;
+uniform vec3 uColor;
+uniform float uAlpha;
+varying float vDepth;
+void main() {
+  vec2 c = gl_PointCoord - 0.5;
+  float dist = length(c);
+  if (dist > 0.5) discard;
+  float soft = smoothstep(0.5, 0.08, dist);
+  float fade = mix(1.0, 0.3, vDepth);
+  gl_FragColor = vec4(uColor, uAlpha * soft * fade);
+}
+`;
+
+/** Generates wireframe edges and unique vertices for a geodesic sphere. */
+function createGeodesicData(radius: number): { lines: Float32Array; points: Float32Array } {
   const t = (1 + Math.sqrt(5)) / 2;
   const rawVerts: Array<[number, number, number]> = [
     [-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0],
@@ -95,12 +111,12 @@ function createGeodesicWireframe(radius: number): Float32Array {
   ];
 
   const edges = new Set<string>();
+  const uniqueVerts = new Map<string, [number, number, number]>();
   const coords: number[] = [];
-  const pushEdge = (a: [number, number, number], b: [number, number, number]) => {
-    coords.push(a[0], a[1], a[2], b[0], b[1], b[2]);
-  };
   const mid = (a: [number, number, number], b: [number, number, number]): [number, number, number] =>
     norm([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2]);
+
+  const keyOf = (v: [number, number, number]) => `${v[0].toFixed(3)},${v[1].toFixed(3)},${v[2].toFixed(3)}`;
 
   for (const [ia, ib, ic] of faces) {
     const a = verts[ia]!;
@@ -116,22 +132,26 @@ function createGeodesicWireframe(radius: number): Float32Array {
       [ab, bc, ca],
     ];
     for (const [p1, p2, p3] of subFaces) {
+      for (const v of [p1, p2, p3]) uniqueVerts.set(keyOf(v), v);
       const pairs: Array<[[number, number, number], [number, number, number]]> = [
         [p1, p2],
         [p2, p3],
         [p3, p1],
       ];
       for (const [u, v] of pairs) {
-        const key1 = `${u[0].toFixed(3)},${u[1].toFixed(3)},${u[2].toFixed(3)}|${v[0].toFixed(3)},${v[1].toFixed(3)},${v[2].toFixed(3)}`;
-        const key2 = `${v[0].toFixed(3)},${v[1].toFixed(3)},${v[2].toFixed(3)}|${u[0].toFixed(3)},${u[1].toFixed(3)},${u[2].toFixed(3)}`;
-        if (!edges.has(key1) && !edges.has(key2)) {
-          edges.add(key1);
-          pushEdge(u, v);
+        const ku = keyOf(u);
+        const kv = keyOf(v);
+        if (!edges.has(`${ku}|${kv}`) && !edges.has(`${kv}|${ku}`)) {
+          edges.add(`${ku}|${kv}`);
+          coords.push(u[0], u[1], u[2], v[0], v[1], v[2]);
         }
       }
     }
   }
-  return new Float32Array(coords);
+
+  const pointCoords: number[] = [];
+  for (const v of uniqueVerts.values()) pointCoords.push(v[0], v[1], v[2]);
+  return { lines: new Float32Array(coords), points: new Float32Array(pointCoords) };
 }
 
 interface Props {
@@ -147,7 +167,7 @@ interface Engine {
   destroy: () => void;
 }
 
-export function ShaderBackground({ colorA, colorB, paused, strength = 0.14 }: Props) {
+export function ShaderBackground({ colorA, colorB, paused, strength = 0.24 }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<Engine | null>(null);
   const initial = useRef({ colorA, colorB, paused, strength });
@@ -181,11 +201,11 @@ export function ShaderBackground({ colorA, colorB, paused, strength = 0.14 }: Pr
     });
     const bgMesh = new Mesh(gl, { geometry: new Triangle(gl), program: bgProgram });
 
-    const camera = new Camera(gl, { fov: 35 });
+    const camera = new Camera(gl, { fov: 36 });
     camera.position.set(0, 0, 5.2);
 
     const scene = new Transform();
-    const outerPositions = createGeodesicWireframe(1.45);
+    const outerData = createGeodesicData(1.85);
     const outerProgram = new Program(gl, {
       vertex: WIRE_VERTEX,
       fragment: WIRE_FRAGMENT,
@@ -193,18 +213,36 @@ export function ShaderBackground({ colorA, colorB, paused, strength = 0.14 }: Pr
       depthTest: false,
       uniforms: {
         uColor: { value: new Color(initial.current.colorB) },
-        uAlpha: { value: 0.22 },
+        uAlpha: { value: 0.42 },
       },
     });
     const outerMesh = new Mesh(gl, {
       mode: gl.LINES,
-      geometry: new Geometry(gl, { position: { size: 3, data: outerPositions } }),
+      geometry: new Geometry(gl, { position: { size: 3, data: outerData.lines } }),
       program: outerProgram,
     });
-    outerMesh.position.set(1.35, 0.55, 0);
+    outerMesh.position.set(1.05, 0.35, 0);
     outerMesh.setParent(scene);
 
-    const innerPositions = createGeodesicWireframe(0.82);
+    const pointsProgram = new Program(gl, {
+      vertex: WIRE_VERTEX,
+      fragment: POINT_FRAGMENT,
+      transparent: true,
+      depthTest: false,
+      uniforms: {
+        uColor: { value: new Color(initial.current.colorB) },
+        uAlpha: { value: 0.78 },
+      },
+    });
+    const pointsMesh = new Mesh(gl, {
+      mode: gl.POINTS,
+      geometry: new Geometry(gl, { position: { size: 3, data: outerData.points } }),
+      program: pointsProgram,
+    });
+    pointsMesh.position.set(1.05, 0.35, 0);
+    pointsMesh.setParent(scene);
+
+    const innerData = createGeodesicData(1.05);
     const innerProgram = new Program(gl, {
       vertex: WIRE_VERTEX,
       fragment: WIRE_FRAGMENT,
@@ -212,15 +250,15 @@ export function ShaderBackground({ colorA, colorB, paused, strength = 0.14 }: Pr
       depthTest: false,
       uniforms: {
         uColor: { value: new Color(initial.current.colorA) },
-        uAlpha: { value: 0.28 },
+        uAlpha: { value: 0.5 },
       },
     });
     const innerMesh = new Mesh(gl, {
       mode: gl.LINES,
-      geometry: new Geometry(gl, { position: { size: 3, data: innerPositions } }),
+      geometry: new Geometry(gl, { position: { size: 3, data: innerData.lines } }),
       program: innerProgram,
     });
-    innerMesh.position.set(1.35, 0.55, 0);
+    innerMesh.position.set(1.05, 0.35, 0);
     innerMesh.setParent(scene);
 
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -236,12 +274,18 @@ export function ShaderBackground({ colorA, colorB, paused, strength = 0.14 }: Pr
 
     const draw = () => {
       bgProgram.uniforms.uTime!.value = elapsed;
-      curX += (targetX - curX) * 0.04;
-      curY += (targetY - curY) * 0.04;
-      outerMesh.rotation.y = elapsed * 0.09 + curX * 0.25;
-      outerMesh.rotation.x = elapsed * 0.05 + curY * 0.2;
-      innerMesh.rotation.y = -elapsed * 0.14 - curX * 0.18;
-      innerMesh.rotation.z = elapsed * 0.08;
+      curX += (targetX - curX) * 0.05;
+      curY += (targetY - curY) * 0.05;
+
+      const rotY = elapsed * 0.11 + curX * 0.25;
+      const rotX = elapsed * 0.06 + curY * 0.2;
+      outerMesh.rotation.y = rotY;
+      outerMesh.rotation.x = rotX;
+      pointsMesh.rotation.y = rotY;
+      pointsMesh.rotation.x = rotX;
+
+      innerMesh.rotation.y = -elapsed * 0.16 - curX * 0.18;
+      innerMesh.rotation.z = elapsed * 0.09;
 
       renderer.autoClear = true;
       renderer.render({ scene: bgMesh });
@@ -303,6 +347,7 @@ export function ShaderBackground({ colorA, colorB, paused, strength = 0.14 }: Pr
         bgProgram.uniforms.uColorB!.value = new Color(b);
         innerProgram.uniforms.uColor!.value = new Color(a);
         outerProgram.uniforms.uColor!.value = new Color(b);
+        pointsProgram.uniforms.uColor!.value = new Color(b);
         if (!raf) draw();
       },
       setPaused: (value) => {
