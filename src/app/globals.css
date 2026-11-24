@@ -5,7 +5,7 @@
   --font-display: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
   --font-mono: var(--font-jbmono), ui-monospace, 'SFMono-Regular', monospace;
 
-  --color-base: #070709;
+  --color-canvas: #070709;
   --color-ink: #f4f4f5;
   --color-muted: #a1a1aa;
   --color-faint: #8b8b95;
@@ -23,7 +23,7 @@
 
 html,
 body {
-  background: var(--color-base);
+  background: var(--color-canvas);
   color: var(--color-ink);
   font-family: var(--font-sans);
   -webkit-font-smoothing: antialiased;

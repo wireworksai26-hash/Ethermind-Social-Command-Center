@@ -1,8 +1,14 @@
+import { z } from 'zod';
 import { asc, eq, inArray } from 'drizzle-orm';
 import { db, schema } from '@/db';
+import { PLATFORMS } from '@/db/schema';
 import { LIVE_CAPABLE } from '@/adapters/registry';
-import { json, route } from '@/lib/api';
-import { canExportOrSync, resolveScope } from '@/lib/access';
+import { ApiError, json, route } from '@/lib/api';
+import { canExportOrSync, requireSuperAdmin, resolveScope } from '@/lib/access';
+import { encryptTokens } from '@/lib/crypto';
+import { getSyncQueue } from '@/lib/queue';
+import { invalidateCache } from '@/lib/redis';
+import { syncAccount } from '@/lib/sync';
 import type { AccountRow, AccountsResponse, TokenHealth } from '@/lib/types';
 
 export const dynamic = 'force-dynamic';
@@ -71,4 +77,68 @@ export const GET = route<Ctx>(async (_req, user, ctx) => {
     metaConfigured: Boolean(process.env.META_APP_ID && process.env.META_APP_SECRET),
   };
   return json(body);
+});
+
+const createAccountSchema = z.object({
+  platform: z.enum(PLATFORMS),
+  handle: z.string().trim().min(1).max(120),
+  displayName: z.string().trim().min(1).max(150),
+  mode: z.enum(['live', 'mock']).default('mock'),
+  platformAccountId: z.string().trim().max(120).optional(),
+  accessToken: z.string().trim().optional(),
+  refreshToken: z.string().trim().optional(),
+});
+
+export const POST = route<Ctx>(async (req, user, ctx) => {
+  requireSuperAdmin(user);
+  const { slug } = await ctx.params;
+  if (slug === 'all') throw new ApiError(400, 'Pilih brand spesifik untuk menambah akun');
+
+  const [workspace] = await db.select().from(schema.workspaces).where(eq(schema.workspaces.slug, slug)).limit(1);
+  if (!workspace) throw new ApiError(404, 'Brand tidak ditemukan');
+
+  const input = createAccountSchema.parse(await req.json().catch(() => null));
+  if (input.mode === 'live' && !input.accessToken) {
+    throw new ApiError(400, 'Access token wajib diisi jika langsung memakai mode LIVE API');
+  }
+
+  const cleanHandle = input.handle.replace(/^@/, '');
+  const platformAccountId = input.platformAccountId?.trim() || `${input.mode}-${slug}-${input.platform}-${cleanHandle}`;
+
+  const [created] = await db
+    .insert(schema.socialAccounts)
+    .values({
+      workspaceId: workspace.id,
+      platform: input.platform,
+      mode: input.mode,
+      platformAccountId,
+      handle: cleanHandle,
+      displayName: input.displayName,
+      status: 'active',
+    })
+    .returning();
+  if (!created) throw new ApiError(500, 'Gagal menambahkan akun');
+
+  if (input.accessToken) {
+    const enc = encryptTokens({
+      accessToken: input.accessToken,
+      refreshToken: input.refreshToken || null,
+    });
+    await db.insert(schema.oauthTokens).values({
+      accountId: created.id,
+      ...enc,
+      scopes: [],
+      expiresAt: new Date(Date.now() + 60 * 86_400_000),
+    });
+  }
+
+  await invalidateCache();
+  const queue = getSyncQueue();
+  if (queue) {
+    await queue.add('sync-account', { accountId: created.id }, { jobId: `add-${created.id}-${Date.now()}` });
+  } else {
+    await syncAccount(created.id);
+  }
+
+  return json({ account: created }, { status: 201 });
 });

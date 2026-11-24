@@ -86,8 +86,8 @@ export function AppShell({ workspaces, user, children }: Props) {
         inert={panelOpen}
       >
         <header className="mx-auto flex w-full max-w-[1320px] flex-wrap items-center gap-x-6 gap-y-3 px-4 pt-5 pb-3 sm:px-6">
-          <Link href={hrefWithScope('/')} className="flex items-baseline gap-2">
-            <span className="font-display text-[17px] font-extrabold tracking-tight">Ethermind</span>
+          <Link href={hrefWithScope('/')} className="flex items-baseline gap-2.5">
+            <span className="font-display text-[17px] font-extrabold tracking-tight text-ink">Ethermind</span>
             <span className="font-mono text-[11px] uppercase tracking-[0.14em] text-faint">Command Center</span>
           </Link>
 
@@ -101,7 +101,7 @@ export function AppShell({ workspaces, user, children }: Props) {
                   aria-current={active ? 'page' : undefined}
                   className={clsx(
                     'rounded-lg px-3 py-1.5 text-sm font-medium transition-colors',
-                    active ? 'bg-white/10 text-ink' : 'text-muted hover:text-ink',
+                    active ? 'bg-white/10 text-ink' : 'text-muted hover:bg-white/[0.04] hover:text-ink',
                   )}
                 >
                   {item.label}
@@ -110,18 +110,19 @@ export function AppShell({ workspaces, user, children }: Props) {
             })}
           </nav>
 
-          <div className="ml-auto flex items-center gap-2">
+          <div className="ml-auto flex items-center gap-2.5">
             <button
               type="button"
               onClick={toggleShader}
               aria-pressed={shaderPaused}
-              aria-label={shaderPaused ? 'Resume background animation' : 'Pause background animation'}
-              className="inline-flex size-9 items-center justify-center rounded-lg border border-line text-muted transition-colors hover:text-ink"
+              title={shaderPaused ? 'Resume 3D background animation' : 'Pause 3D background animation'}
+              className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-line bg-white/[0.03] px-2.5 font-mono text-[11px] text-muted transition-colors hover:bg-white/[0.07] hover:text-ink"
             >
-              {shaderPaused ? <Play className="size-4" /> : <Pause className="size-4" />}
+              {shaderPaused ? <Play className="size-3.5" /> : <Pause className="size-3.5" />}
+              <span className="hidden md:inline">{shaderPaused ? '3D BG: Paused' : '3D BG: On'}</span>
             </button>
             <div className="hidden text-right sm:block">
-              <p className="text-[13px] font-medium leading-tight">{user.name}</p>
+              <p className="text-[13px] font-medium leading-tight text-ink">{user.name}</p>
               <p className="font-mono text-[10px] uppercase tracking-wider text-faint">
                 {user.isSuperAdmin ? 'Super Admin' : 'Team'}
               </p>
@@ -129,8 +130,9 @@ export function AppShell({ workspaces, user, children }: Props) {
             <button
               type="button"
               onClick={signOut}
+              title="Sign out"
               aria-label="Sign out"
-              className="inline-flex size-9 items-center justify-center rounded-lg border border-line text-muted transition-colors hover:text-ink"
+              className="inline-flex size-9 items-center justify-center rounded-lg border border-line bg-white/[0.03] text-muted transition-colors hover:bg-white/[0.07] hover:text-ink"
             >
               <LogOut className="size-4" />
             </button>
@@ -145,7 +147,15 @@ export function AppShell({ workspaces, user, children }: Props) {
           />
         </div>
 
-        <main className="mx-auto w-full max-w-[1320px] px-4 pt-6 pb-20 sm:px-6">{children}</main>
+        <motion.main
+          key={pathname}
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.32, ease: [0.22, 1, 0.36, 1] }}
+          className="mx-auto w-full max-w-[1320px] px-4 pt-6 pb-20 sm:px-6"
+        >
+          {children}
+        </motion.main>
       </motion.div>
       <PostPanel />
     </ShellContext.Provider>

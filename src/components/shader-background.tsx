@@ -1,9 +1,9 @@
 'use client';
 
-import { Color, Mesh, Program, Renderer, Triangle } from 'ogl';
+import { Camera, Color, Geometry, Mesh, Program, Renderer, Transform, Triangle } from 'ogl';
 import { useEffect, useRef } from 'react';
 
-const VERTEX = /* glsl */ `
+const BG_VERTEX = /* glsl */ `
 attribute vec2 position;
 attribute vec2 uv;
 varying vec2 vUv;
@@ -13,7 +13,7 @@ void main() {
 }
 `;
 
-const FRAGMENT = /* glsl */ `
+const BG_FRAGMENT = /* glsl */ `
 precision mediump float;
 uniform float uTime;
 uniform vec2 uResolution;
@@ -51,11 +51,93 @@ void main() {
 }
 `;
 
+const WIRE_VERTEX = /* glsl */ `
+attribute vec3 position;
+uniform mat4 modelViewMatrix;
+uniform mat4 projectionMatrix;
+varying float vDepth;
+void main() {
+  vec4 mvPos = modelViewMatrix * vec4(position, 1.0);
+  vDepth = clamp((-mvPos.z - 2.2) / 3.4, 0.0, 1.0);
+  gl_Position = projectionMatrix * mvPos;
+}
+`;
+
+const WIRE_FRAGMENT = /* glsl */ `
+precision mediump float;
+uniform vec3 uColor;
+uniform float uAlpha;
+varying float vDepth;
+void main() {
+  float fade = mix(1.0, 0.22, vDepth);
+  gl_FragColor = vec4(uColor, uAlpha * fade);
+}
+`;
+
+/** Generates wireframe edges for a subdivided icosahedron / geodesic sphere. */
+function createGeodesicWireframe(radius: number): Float32Array {
+  const t = (1 + Math.sqrt(5)) / 2;
+  const rawVerts: Array<[number, number, number]> = [
+    [-1, t, 0], [1, t, 0], [-1, -t, 0], [1, -t, 0],
+    [0, -1, t], [0, 1, t], [0, -1, -t], [0, 1, -t],
+    [t, 0, -1], [t, 0, 1], [-t, 0, -1], [-t, 0, 1],
+  ];
+  const norm = (v: [number, number, number]): [number, number, number] => {
+    const len = Math.hypot(v[0], v[1], v[2]);
+    return [(v[0] / len) * radius, (v[1] / len) * radius, (v[2] / len) * radius];
+  };
+  const verts = rawVerts.map(norm);
+  const faces: Array<[number, number, number]> = [
+    [0, 11, 5], [0, 5, 1], [0, 1, 7], [0, 7, 10], [0, 10, 11],
+    [1, 5, 9], [5, 11, 4], [11, 10, 2], [10, 7, 6], [7, 1, 8],
+    [3, 9, 4], [3, 4, 2], [3, 2, 6], [3, 6, 8], [3, 8, 9],
+    [4, 9, 5], [2, 4, 11], [6, 2, 10], [8, 6, 7], [9, 8, 1],
+  ];
+
+  const edges = new Set<string>();
+  const coords: number[] = [];
+  const pushEdge = (a: [number, number, number], b: [number, number, number]) => {
+    coords.push(a[0], a[1], a[2], b[0], b[1], b[2]);
+  };
+  const mid = (a: [number, number, number], b: [number, number, number]): [number, number, number] =>
+    norm([(a[0] + b[0]) / 2, (a[1] + b[1]) / 2, (a[2] + b[2]) / 2]);
+
+  for (const [ia, ib, ic] of faces) {
+    const a = verts[ia]!;
+    const b = verts[ib]!;
+    const c = verts[ic]!;
+    const ab = mid(a, b);
+    const bc = mid(b, c);
+    const ca = mid(c, a);
+    const subFaces: Array<[[number, number, number], [number, number, number], [number, number, number]]> = [
+      [a, ab, ca],
+      [b, bc, ab],
+      [c, ca, bc],
+      [ab, bc, ca],
+    ];
+    for (const [p1, p2, p3] of subFaces) {
+      const pairs: Array<[[number, number, number], [number, number, number]]> = [
+        [p1, p2],
+        [p2, p3],
+        [p3, p1],
+      ];
+      for (const [u, v] of pairs) {
+        const key1 = `${u[0].toFixed(3)},${u[1].toFixed(3)},${u[2].toFixed(3)}|${v[0].toFixed(3)},${v[1].toFixed(3)},${v[2].toFixed(3)}`;
+        const key2 = `${v[0].toFixed(3)},${v[1].toFixed(3)},${v[2].toFixed(3)}|${u[0].toFixed(3)},${u[1].toFixed(3)},${u[2].toFixed(3)}`;
+        if (!edges.has(key1) && !edges.has(key2)) {
+          edges.add(key1);
+          pushEdge(u, v);
+        }
+      }
+    }
+  }
+  return new Float32Array(coords);
+}
+
 interface Props {
   colorA: string;
   colorB: string;
   paused: boolean;
-  /** 0.12 to 0.16 keeps numbers legible over the glow. */
   strength?: number;
 }
 
@@ -77,16 +159,18 @@ export function ShaderBackground({ colorA, colorB, paused, strength = 0.14 }: Pr
     const renderer = new Renderer({
       dpr: Math.min(window.devicePixelRatio, 1.5),
       alpha: false,
-      antialias: false,
+      antialias: true,
       powerPreference: 'low-power',
     });
     const gl = renderer.gl;
     host.appendChild(gl.canvas);
     gl.canvas.style.cssText = 'width:100%;height:100%;display:block';
 
-    const program = new Program(gl, {
-      vertex: VERTEX,
-      fragment: FRAGMENT,
+    const bgProgram = new Program(gl, {
+      vertex: BG_VERTEX,
+      fragment: BG_FRAGMENT,
+      depthTest: false,
+      depthWrite: false,
       uniforms: {
         uTime: { value: 0 },
         uResolution: { value: [1, 1] },
@@ -95,7 +179,49 @@ export function ShaderBackground({ colorA, colorB, paused, strength = 0.14 }: Pr
         uStrength: { value: initial.current.strength },
       },
     });
-    const mesh = new Mesh(gl, { geometry: new Triangle(gl), program });
+    const bgMesh = new Mesh(gl, { geometry: new Triangle(gl), program: bgProgram });
+
+    const camera = new Camera(gl, { fov: 35 });
+    camera.position.set(0, 0, 5.2);
+
+    const scene = new Transform();
+    const outerPositions = createGeodesicWireframe(1.45);
+    const outerProgram = new Program(gl, {
+      vertex: WIRE_VERTEX,
+      fragment: WIRE_FRAGMENT,
+      transparent: true,
+      depthTest: false,
+      uniforms: {
+        uColor: { value: new Color(initial.current.colorB) },
+        uAlpha: { value: 0.22 },
+      },
+    });
+    const outerMesh = new Mesh(gl, {
+      mode: gl.LINES,
+      geometry: new Geometry(gl, { position: { size: 3, data: outerPositions } }),
+      program: outerProgram,
+    });
+    outerMesh.position.set(1.35, 0.55, 0);
+    outerMesh.setParent(scene);
+
+    const innerPositions = createGeodesicWireframe(0.82);
+    const innerProgram = new Program(gl, {
+      vertex: WIRE_VERTEX,
+      fragment: WIRE_FRAGMENT,
+      transparent: true,
+      depthTest: false,
+      uniforms: {
+        uColor: { value: new Color(initial.current.colorA) },
+        uAlpha: { value: 0.28 },
+      },
+    });
+    const innerMesh = new Mesh(gl, {
+      mode: gl.LINES,
+      geometry: new Geometry(gl, { position: { size: 3, data: innerPositions } }),
+      program: innerProgram,
+    });
+    innerMesh.position.set(1.35, 0.55, 0);
+    innerMesh.setParent(scene);
 
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
     let userPaused = initial.current.paused;
@@ -103,10 +229,24 @@ export function ShaderBackground({ colorA, colorB, paused, strength = 0.14 }: Pr
     let raf = 0;
     let elapsed = 0;
     let last = 0;
+    let targetX = 0;
+    let targetY = 0;
+    let curX = 0;
+    let curY = 0;
 
     const draw = () => {
-      program.uniforms.uTime!.value = elapsed;
-      renderer.render({ scene: mesh });
+      bgProgram.uniforms.uTime!.value = elapsed;
+      curX += (targetX - curX) * 0.04;
+      curY += (targetY - curY) * 0.04;
+      outerMesh.rotation.y = elapsed * 0.09 + curX * 0.25;
+      outerMesh.rotation.x = elapsed * 0.05 + curY * 0.2;
+      innerMesh.rotation.y = -elapsed * 0.14 - curX * 0.18;
+      innerMesh.rotation.z = elapsed * 0.08;
+
+      renderer.autoClear = true;
+      renderer.render({ scene: bgMesh });
+      renderer.autoClear = false;
+      renderer.render({ scene, camera });
     };
 
     const shouldRun = () => !userPaused && !tabHidden && !reducedMotion.matches;
@@ -131,9 +271,17 @@ export function ShaderBackground({ colorA, colorB, paused, strength = 0.14 }: Pr
 
     const resize = () => {
       const { clientWidth, clientHeight } = host;
-      renderer.setSize(Math.max(clientWidth, 1), Math.max(clientHeight, 1));
-      program.uniforms.uResolution!.value = [gl.canvas.width, gl.canvas.height];
+      const w = Math.max(clientWidth, 1);
+      const h = Math.max(clientHeight, 1);
+      renderer.setSize(w, h);
+      camera.perspective({ aspect: w / h });
+      bgProgram.uniforms.uResolution!.value = [gl.canvas.width, gl.canvas.height];
       draw();
+    };
+
+    const onPointerMove = (e: PointerEvent) => {
+      targetX = (e.clientX / window.innerWidth - 0.5) * 2;
+      targetY = (e.clientY / window.innerHeight - 0.5) * 2;
     };
 
     const onVisibility = () => {
@@ -144,14 +292,17 @@ export function ShaderBackground({ colorA, colorB, paused, strength = 0.14 }: Pr
     const observer = new ResizeObserver(resize);
     observer.observe(host);
     document.addEventListener('visibilitychange', onVisibility);
+    window.addEventListener('pointermove', onPointerMove, { passive: true });
     reducedMotion.addEventListener('change', sync);
     resize();
     sync();
 
     engineRef.current = {
       setColors: (a, b) => {
-        program.uniforms.uColorA!.value = new Color(a);
-        program.uniforms.uColorB!.value = new Color(b);
+        bgProgram.uniforms.uColorA!.value = new Color(a);
+        bgProgram.uniforms.uColorB!.value = new Color(b);
+        innerProgram.uniforms.uColor!.value = new Color(a);
+        outerProgram.uniforms.uColor!.value = new Color(b);
         if (!raf) draw();
       },
       setPaused: (value) => {
@@ -162,6 +313,7 @@ export function ShaderBackground({ colorA, colorB, paused, strength = 0.14 }: Pr
         cancelAnimationFrame(raf);
         observer.disconnect();
         document.removeEventListener('visibilitychange', onVisibility);
+        window.removeEventListener('pointermove', onPointerMove);
         reducedMotion.removeEventListener('change', sync);
         gl.getExtension('WEBGL_lose_context')?.loseContext();
         gl.canvas.remove();
@@ -182,5 +334,5 @@ export function ShaderBackground({ colorA, colorB, paused, strength = 0.14 }: Pr
     engineRef.current?.setPaused(paused);
   }, [paused]);
 
-  return <div ref={hostRef} aria-hidden="true" className="pointer-events-none fixed inset-0 -z-10 bg-base" />;
+  return <div ref={hostRef} aria-hidden="true" className="pointer-events-none fixed inset-0 -z-10 bg-canvas" />;
 }
