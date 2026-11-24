@@ -75,7 +75,7 @@ export function AppShell({ workspaces, user, children }: Props) {
     <ShellContext.Provider value={{ workspaces, user, canExport, openPostId, openPost, closePost }}>
       <ShaderBackground colorA={theme.primary} colorB={theme.secondary} paused={shaderPaused || panelOpen} />
       <motion.div
-        className="min-h-dvh origin-top overflow-x-clip"
+        className="relative z-10 min-h-dvh origin-top overflow-x-clip"
         style={{
           '--accent-a': theme.primary,
           '--accent-b': theme.secondary,

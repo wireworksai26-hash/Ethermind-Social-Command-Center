@@ -379,5 +379,5 @@ export function ShaderBackground({ colorA, colorB, paused, strength = 0.24 }: Pr
     engineRef.current?.setPaused(paused);
   }, [paused]);
 
-  return <div ref={hostRef} aria-hidden="true" className="pointer-events-none fixed inset-0 -z-10 bg-canvas" />;
+  return <div ref={hostRef} aria-hidden="true" className="pointer-events-none fixed inset-0 z-0 bg-canvas" />;
 }
