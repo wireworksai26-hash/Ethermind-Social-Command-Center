@@ -293,10 +293,11 @@ export function ShaderBackground({ colorA, colorB, paused, strength = 0.24 }: Pr
       renderer.render({ scene, camera });
     };
 
-    const shouldRun = () => !userPaused && !tabHidden && !reducedMotion.matches;
+    const shouldRun = () => !userPaused && !tabHidden;
 
     const frame = (now: number) => {
-      elapsed += (now - last) / 1000;
+      const speed = reducedMotion.matches ? 0.35 : 1;
+      elapsed += ((now - last) / 1000) * speed;
       last = now;
       draw();
       raf = requestAnimationFrame(frame);

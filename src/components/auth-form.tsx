@@ -40,7 +40,7 @@ export function AuthForm({ mode }: { mode: 'login' | 'signup' }) {
   return (
     <>
       <ShaderBackground colorA="#4F46E5" colorB="#10B981" paused={false} />
-      <main className="flex min-h-dvh items-center justify-center px-4 py-10">
+      <main className="relative z-10 flex min-h-dvh items-center justify-center px-4 py-10">
         <div className="glass w-full max-w-[400px] rounded-[20px] p-7">
           <p className="font-display text-xl font-extrabold tracking-tight">Ethermind</p>
           <p className="font-mono text-[11px] uppercase tracking-[0.14em] text-faint">Social Command Center</p>
