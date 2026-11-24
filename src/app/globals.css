@@ -1,0 +1,149 @@
+@import 'tailwindcss';
+
+@theme {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-jakarta), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-jbmono), ui-monospace, 'SFMono-Regular', monospace;
+
+  --color-base: #070709;
+  --color-ink: #f4f4f5;
+  --color-muted: #a1a1aa;
+  --color-faint: #8b8b95;
+  --color-line: rgba(255, 255, 255, 0.08);
+  --color-good: #34d399;
+  --color-bad: #fb7185;
+  --color-warn: #fbbf24;
+}
+
+:root {
+  --accent-a: #4f46e5;
+  --accent-b: #3b82f6;
+  color-scheme: dark;
+}
+
+html,
+body {
+  background: var(--color-base);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  min-height: 100dvh;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+.glass {
+  background: rgba(16, 17, 23, 0.65);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14);
+}
+
+.focus-ring:focus-visible,
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--accent-b);
+  outline-offset: 2px;
+}
+
+/* ZEN kinetic button: double-layer vertical text roll */
+.kinetic {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  overflow: hidden;
+  border-radius: 0.625rem;
+  padding: 0.5rem 0.875rem;
+  font-size: 0.8125rem;
+  font-weight: 600;
+  line-height: 1.25rem;
+  cursor: pointer;
+  transition:
+    background-color 0.2s,
+    border-color 0.2s,
+    opacity 0.2s;
+}
+
+.kinetic[data-variant='primary'] {
+  background: linear-gradient(180deg, var(--accent-a), color-mix(in oklab, var(--accent-a) 78%, black));
+  color: #fff;
+  border: 1px solid color-mix(in oklab, var(--accent-a) 70%, white);
+}
+
+.kinetic[data-variant='ghost'] {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--color-ink);
+  border: 1px solid var(--color-line);
+}
+
+.kinetic[data-variant='ghost']:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.kinetic:disabled,
+.kinetic[aria-disabled='true'] {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.kinetic-label {
+  position: relative;
+  display: block;
+  height: 1.25rem;
+  overflow: hidden;
+}
+
+.kinetic-label > span {
+  display: block;
+  transition: transform 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+.kinetic:not(:disabled):hover .kinetic-label > span {
+  transform: translateY(-100%);
+}
+
+.skeleton {
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.04), rgba(255, 255, 255, 0.09), rgba(255, 255, 255, 0.04));
+  background-size: 200% 100%;
+  animation: shimmer 1.6s linear infinite;
+  border-radius: 0.5rem;
+}
+
+@keyframes shimmer {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .kinetic-label > span {
+    transition: none;
+  }
+  .kinetic:hover .kinetic-label > span {
+    transform: none;
+  }
+  .skeleton {
+    animation: none;
+  }
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 999px;
+}
