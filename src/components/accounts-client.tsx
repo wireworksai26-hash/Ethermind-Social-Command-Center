@@ -30,11 +30,24 @@ const STATUS_LABEL: Record<AccountRow['status'], string> = {
 };
 
 const OAUTH_MESSAGES: Record<string, { tone: 'ok' | 'error'; text: string }> = {
-  connected: { tone: 'ok', text: 'Akun Meta berhasil terhubung. Sinkronisasi data asli sedang berjalan.' },
-  denied: { tone: 'error', text: 'Otorisasi Meta dibatalkan atau tidak dapat diverifikasi.' },
-  not_configured: { tone: 'error', text: 'META_APP_ID dan META_APP_SECRET belum dipasang di server.' },
-  error: { tone: 'error', text: 'Gagal menghubungkan akun Meta. Cek pengaturan Redirect URI dan coba lagi.' },
+  connected: { tone: 'ok', text: 'Akun berhasil terhubung. Sinkronisasi data asli sedang berjalan.' },
+  denied: { tone: 'error', text: 'Otorisasi OAuth dibatalkan atau tidak dapat diverifikasi.' },
+  not_configured: { tone: 'error', text: 'Kredensial OAuth platform belum dipasang di server.' },
+  error: { tone: 'error', text: 'Gagal menghubungkan akun. Cek pengaturan Redirect URI dan coba lagi.' },
 };
+
+function oauthStartUrl(platform: Platform, workspaceSlug: string, data: AccountsResponse): string | null {
+  if ((platform === 'instagram' || platform === 'facebook') && data.metaConfigured) {
+    return `/api/v1/oauth/meta/start?workspace=${workspaceSlug}`;
+  }
+  if (platform === 'tiktok' && data.tiktokConfigured) {
+    return `/api/v1/oauth/tiktok/start?workspace=${workspaceSlug}`;
+  }
+  if (platform === 'x' && data.xConfigured) {
+    return `/api/v1/oauth/x/start?workspace=${workspaceSlug}`;
+  }
+  return null;
+}
 
 const THEME_PRESETS = [
   { label: 'Indigo Cobalt', primary: '#4F46E5', secondary: '#3B82F6' },
@@ -119,6 +132,22 @@ export function AccountsClient() {
                   variant="primary"
                   icon={<Link2 className="size-4" aria-hidden="true" />}
                   label="Connect Meta (FB & IG)"
+                />
+              )}
+              {activeBrandSlug && data.tiktokConfigured && (
+                <KineticLink
+                  href={`/api/v1/oauth/tiktok/start?workspace=${activeBrandSlug}`}
+                  variant="ghost"
+                  icon={<Link2 className="size-4" aria-hidden="true" />}
+                  label="Connect TikTok"
+                />
+              )}
+              {activeBrandSlug && data.xConfigured && (
+                <KineticLink
+                  href={`/api/v1/oauth/x/start?workspace=${activeBrandSlug}`}
+                  variant="ghost"
+                  icon={<Link2 className="size-4" aria-hidden="true" />}
+                  label="Connect X"
                 />
               )}
               {workspaces.length > 0 && (
@@ -269,19 +298,26 @@ export function AccountsClient() {
                       <KineticButton label="Sync" disabled={sync.isPending} onClick={() => sync.mutate(a.id)} />
                     )}
                     {data.canManage &&
-                      (a.liveCapable ? (
-                        data.metaConfigured ? (
-                          <KineticLink
-                            href={`/api/v1/oauth/meta/start?workspace=${a.workspaceSlug}`}
-                            icon={<Link2 className="size-4" aria-hidden="true" />}
-                            label={a.mode === 'live' && a.status === 'active' ? 'Reconnect' : 'Login Meta'}
-                          />
-                        ) : (
-                          <span className="text-xs text-faint">Meta OAuth not configured</span>
-                        )
-                      ) : (
-                        <span className="text-xs text-faint">{PLATFORM_META[a.platform].label} OAuth pending app review</span>
-                      ))}
+                      (() => {
+                        const oauthHref = oauthStartUrl(a.platform, a.workspaceSlug, data);
+                        if (oauthHref) {
+                          return (
+                            <KineticLink
+                              href={oauthHref}
+                              icon={<Link2 className="size-4" aria-hidden="true" />}
+                              label={a.mode === 'live' && a.status === 'active' ? 'Reconnect' : `Login ${PLATFORM_META[a.platform].label}`}
+                            />
+                          );
+                        }
+                        if (a.liveCapable) {
+                          return (
+                            <span className="text-xs text-faint">
+                              {PLATFORM_META[a.platform].label} App Client ID/Secret belum diset
+                            </span>
+                          );
+                        }
+                        return <span className="text-xs text-faint">{PLATFORM_META[a.platform].label} OAuth pending app review</span>;
+                      })()}
                     {data.canManage && (
                       <button
                         type="button"

@@ -88,6 +88,8 @@ export interface AccountsResponse {
   canManage: boolean;
   canSync: boolean;
   metaConfigured: boolean;
+  tiktokConfigured: boolean;
+  xConfigured: boolean;
 }
 
 export interface TeamResponse {

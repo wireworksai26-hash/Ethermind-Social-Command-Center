@@ -72,6 +72,11 @@ function chunk<T>(items: T[], size: number): T[][] {
   return out;
 }
 
+function clampEr(n: number): number {
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return Number(Math.min(999.999, n).toFixed(3));
+}
+
 export async function syncAccount(accountId: string): Promise<SyncResult> {
   const started = Date.now();
   const loaded = await loadAccountRef(accountId);
@@ -92,12 +97,12 @@ export async function syncAccount(accountId: string): Promise<SyncResult> {
           part.map((m) => ({
             accountId,
             metricDate: m.date,
-            followersCount: m.followersCount,
-            followersDelta: m.followersDelta,
-            totalReach: m.totalReach,
-            totalImpressions: m.totalImpressions,
-            profileViews: m.profileViews,
-            engagementRate: m.engagementRate,
+            followersCount: Math.max(0, Math.round(m.followersCount)),
+            followersDelta: Math.round(m.followersDelta),
+            totalReach: Math.max(0, Math.round(m.totalReach)),
+            totalImpressions: Math.max(0, Math.round(m.totalImpressions)),
+            profileViews: Math.max(0, Math.round(m.profileViews)),
+            engagementRate: clampEr(m.engagementRate),
           })),
         )
         .onConflictDoUpdate({
@@ -129,11 +134,11 @@ export async function syncAccount(accountId: string): Promise<SyncResult> {
             publishedAt: p.publishedAt,
             viewsCount: p.viewsCount,
             reachCount: p.reachCount,
-            likesCount: p.likesCount,
-            commentsCount: p.commentsCount,
-            sharesCount: p.sharesCount,
-            savesCount: p.savesCount,
-            engagementRate: p.engagementRate,
+            likesCount: Math.max(0, Math.round(p.likesCount)),
+            commentsCount: Math.max(0, Math.round(p.commentsCount)),
+            sharesCount: Math.max(0, Math.round(p.sharesCount)),
+            savesCount: Math.max(0, Math.round(p.savesCount)),
+            engagementRate: clampEr(p.engagementRate),
             isViralSpike: viral.has(p.platformPostId),
             hourlyVelocity: p.hourlyVelocity,
             lastUpdatedAt: new Date(),

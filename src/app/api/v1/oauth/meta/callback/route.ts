@@ -1,11 +1,12 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { and, eq, like, sql } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { db, schema } from '@/db';
 import { getUserFromHeaders } from '@/lib/api';
-import { encryptTokens, verifyState } from '@/lib/crypto';
+import { verifyState } from '@/lib/crypto';
 import { env } from '@/lib/env';
-import { invalidateCache } from '@/lib/redis';
+import { upsertLiveAccount } from '@/lib/oauth-account';
 import { getSyncQueue } from '@/lib/queue';
+import { invalidateCache } from '@/lib/redis';
 import { syncAccount } from '@/lib/sync';
 
 export const dynamic = 'force-dynamic';
@@ -37,88 +38,6 @@ async function graphGet<T>(path: string, params: Record<string, string>): Promis
 
 function redirectTo(path: string): NextResponse {
   return NextResponse.redirect(new URL(path, env().BETTER_AUTH_URL));
-}
-
-interface UpsertInput {
-  workspaceId: string;
-  platform: 'instagram' | 'facebook';
-  platformAccountId: string;
-  handle: string;
-  displayName: string;
-  avatarUrl: string | null;
-  accessToken: string;
-  refreshToken: string;
-  expiresAt: Date | null;
-}
-
-/**
- * Claims the workspace's seeded mock row for this platform when one exists (so history from the mock
- * adapter is replaced, not mixed with live data); otherwise inserts a new live account.
- */
-async function upsertLiveAccount(input: UpsertInput): Promise<string> {
-  return db.transaction(async (tx) => {
-    const [existing] = await tx
-      .select({ id: schema.socialAccounts.id })
-      .from(schema.socialAccounts)
-      .where(
-        and(
-          eq(schema.socialAccounts.workspaceId, input.workspaceId),
-          eq(schema.socialAccounts.platform, input.platform),
-          eq(schema.socialAccounts.platformAccountId, input.platformAccountId),
-        ),
-      )
-      .limit(1);
-
-    let accountId = existing?.id;
-    if (!accountId) {
-      const [mockRow] = await tx
-        .select({ id: schema.socialAccounts.id })
-        .from(schema.socialAccounts)
-        .where(
-          and(
-            eq(schema.socialAccounts.workspaceId, input.workspaceId),
-            eq(schema.socialAccounts.platform, input.platform),
-            eq(schema.socialAccounts.mode, 'mock'),
-            like(schema.socialAccounts.platformAccountId, 'mock-%'),
-          ),
-        )
-        .limit(1);
-      if (mockRow) {
-        accountId = mockRow.id;
-        await tx.delete(schema.accountDailyMetrics).where(eq(schema.accountDailyMetrics.accountId, accountId));
-        await tx.delete(schema.socialPosts).where(eq(schema.socialPosts.accountId, accountId));
-      }
-    }
-
-    const fields = {
-      mode: 'live' as const,
-      platformAccountId: input.platformAccountId,
-      handle: input.handle,
-      displayName: input.displayName,
-      avatarUrl: input.avatarUrl,
-      status: 'active' as const,
-    };
-    if (accountId) {
-      await tx.update(schema.socialAccounts).set(fields).where(eq(schema.socialAccounts.id, accountId));
-    } else {
-      const [created] = await tx
-        .insert(schema.socialAccounts)
-        .values({ workspaceId: input.workspaceId, platform: input.platform, ...fields })
-        .returning({ id: schema.socialAccounts.id });
-      if (!created) throw new Error('Failed to create account');
-      accountId = created.id;
-    }
-
-    const enc = encryptTokens({ accessToken: input.accessToken, refreshToken: input.refreshToken });
-    await tx
-      .insert(schema.oauthTokens)
-      .values({ accountId, ...enc, expiresAt: input.expiresAt, scopes: [] })
-      .onConflictDoUpdate({
-        target: schema.oauthTokens.accountId,
-        set: { ...enc, expiresAt: input.expiresAt, updatedAt: sql`now()` },
-      });
-    return accountId;
-  });
 }
 
 export async function GET(req: NextRequest): Promise<NextResponse> {

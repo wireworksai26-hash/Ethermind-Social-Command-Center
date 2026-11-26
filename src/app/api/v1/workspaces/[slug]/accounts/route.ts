@@ -75,6 +75,8 @@ export const GET = route<Ctx>(async (_req, user, ctx) => {
     canManage: user.isSuperAdmin,
     canSync: scope.some((w) => canExportOrSync(w.role)),
     metaConfigured: Boolean(process.env.META_APP_ID && process.env.META_APP_SECRET),
+    tiktokConfigured: Boolean(process.env.TIKTOK_CLIENT_KEY && process.env.TIKTOK_CLIENT_SECRET),
+    xConfigured: Boolean(process.env.X_CLIENT_ID && process.env.X_CLIENT_SECRET),
   };
   return json(body);
 });

@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
+import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { env } from './env';
 
 export interface TokenPayload {
@@ -37,8 +37,14 @@ export function decryptTokens(row: EncryptedTokens): TokenPayload {
   return JSON.parse(decrypted.toString('utf8')) as TokenPayload;
 }
 
+export interface OAuthStatePayload {
+  workspace: string;
+  userId: string;
+  codeVerifier?: string;
+}
+
 /** Signs a short-lived OAuth `state` value bound to a user. */
-export function signState(data: { workspace: string; userId: string }): string {
+export function signState(data: OAuthStatePayload): string {
   const body = Buffer.from(
     JSON.stringify({ ...data, exp: Date.now() + 10 * 60_000, nonce: randomBytes(8).toString('hex') }),
   ).toString('base64url');
@@ -46,7 +52,7 @@ export function signState(data: { workspace: string; userId: string }): string {
   return `${body}.${sig}`;
 }
 
-export function verifyState(state: string): { workspace: string; userId: string } | null {
+export function verifyState(state: string): OAuthStatePayload | null {
   const [body, sig] = state.split('.');
   if (!body || !sig) return null;
   const expected = createHmac('sha256', env().BETTER_AUTH_SECRET).update(body).digest('base64url');
@@ -54,14 +60,16 @@ export function verifyState(state: string): { workspace: string; userId: string 
   const b = Buffer.from(expected);
   if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
   try {
-    const parsed = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as {
-      workspace: string;
-      userId: string;
-      exp: number;
-    };
+    const parsed = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as OAuthStatePayload & { exp: number };
     if (parsed.exp < Date.now()) return null;
-    return { workspace: parsed.workspace, userId: parsed.userId };
+    return { workspace: parsed.workspace, userId: parsed.userId, codeVerifier: parsed.codeVerifier };
   } catch {
     return null;
   }
+}
+
+export function createPkcePair(): { verifier: string; challenge: string } {
+  const verifier = randomBytes(32).toString('base64url');
+  const challenge = createHash('sha256').update(verifier).digest('base64url');
+  return { verifier, challenge };
 }
