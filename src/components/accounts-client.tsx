@@ -3,7 +3,7 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { Building2, KeyRound, Link2, Plus, RefreshCw, X } from 'lucide-react';
+import { Building2, Link2, Plus, RefreshCw, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
 import { apiGet, apiSend } from '@/lib/client/api';
@@ -16,10 +16,10 @@ import { ModeBadge, PlatformBadge } from './platform-badge';
 import { useShell } from './shell-context';
 
 const HEALTH: Record<TokenHealth, { label: string; className: string }> = {
-  healthy: { label: 'Healthy', className: 'text-emerald-300' },
+  healthy: { label: 'Connected', className: 'text-emerald-300' },
   expiring_soon: { label: 'Expiring soon', className: 'text-amber-300' },
-  needs_reauth: { label: 'Needs re-auth', className: 'text-rose-300' },
-  not_applicable: { label: 'No token (mock)', className: 'text-faint' },
+  needs_reauth: { label: 'Needs reconnect', className: 'text-rose-300' },
+  not_applicable: { label: 'Mock sample', className: 'text-faint' },
 };
 
 const STATUS_LABEL: Record<AccountRow['status'], string> = {
@@ -30,10 +30,10 @@ const STATUS_LABEL: Record<AccountRow['status'], string> = {
 };
 
 const OAUTH_MESSAGES: Record<string, { tone: 'ok' | 'error'; text: string }> = {
-  connected: { tone: 'ok', text: 'Meta accounts connected. The first live sync is running.' },
-  denied: { tone: 'error', text: 'The Meta authorization was cancelled or could not be verified.' },
-  not_configured: { tone: 'error', text: 'META_APP_ID and META_APP_SECRET are not set on the server.' },
-  error: { tone: 'error', text: 'Connecting Meta failed. Check the server logs and try again.' },
+  connected: { tone: 'ok', text: 'Akun Meta berhasil terhubung. Sinkronisasi data asli sedang berjalan.' },
+  denied: { tone: 'error', text: 'Otorisasi Meta dibatalkan atau tidak dapat diverifikasi.' },
+  not_configured: { tone: 'error', text: 'META_APP_ID dan META_APP_SECRET belum dipasang di server.' },
+  error: { tone: 'error', text: 'Gagal menghubungkan akun Meta. Cek pengaturan Redirect URI dan coba lagi.' },
 };
 
 const THEME_PRESETS = [
@@ -53,7 +53,6 @@ export function AccountsClient() {
 
   const [newBrandOpen, setNewBrandOpen] = useState(false);
   const [addAccountSlug, setAddAccountSlug] = useState<string | null>(null);
-  const [configAccount, setConfigAccount] = useState<AccountRow | null>(null);
 
   const { data, isPending, isError, error, refetch } = useQuery({
     queryKey: ['accounts', slug],
@@ -83,6 +82,8 @@ export function AccountsClient() {
     else grouped.set(a.workspaceName, { slug: a.workspaceSlug, accounts: [a] });
   }
 
+  const activeBrandSlug = slug !== 'all' ? slug : workspaces[0]?.slug;
+
   return (
     <div className="space-y-6">
       <div className="flex flex-wrap items-end justify-between gap-4">
@@ -91,7 +92,7 @@ export function AccountsClient() {
             Accounts and data sources
           </h1>
           <p className="mt-1 max-w-2xl text-sm text-muted">
-            Kelola brand, tambah akun media sosial, dan pasang token API langsung dari sini tanpa perlu membuka Railway env.
+            Hubungkan akun media sosial langsung dengan login akun resmi (OAuth 1-klik) per brand, tanpa perlu salin token manual.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -103,19 +104,27 @@ export function AccountsClient() {
                 icon={<Building2 className="size-4" aria-hidden="true" />}
                 onClick={() => setNewBrandOpen(true)}
               />
+              {activeBrandSlug && data.metaConfigured && (
+                <KineticLink
+                  href={`/api/v1/oauth/meta/start?workspace=${activeBrandSlug}`}
+                  variant="primary"
+                  icon={<Link2 className="size-4" aria-hidden="true" />}
+                  label="Connect Meta (FB & IG)"
+                />
+              )}
               {workspaces.length > 0 && (
                 <KineticButton
                   variant="ghost"
                   label="Add Account"
                   icon={<Plus className="size-4" aria-hidden="true" />}
-                  onClick={() => setAddAccountSlug(slug !== 'all' ? slug : workspaces[0]!.slug)}
+                  onClick={() => setAddAccountSlug(activeBrandSlug ?? null)}
                 />
               )}
             </>
           )}
           {data?.canSync && (
             <KineticButton
-              variant="primary"
+              variant={data.metaConfigured ? 'ghost' : 'primary'}
               label={sync.isPending ? 'Syncing...' : 'Sync data'}
               icon={<RefreshCw className={clsx('size-4', sync.isPending && 'animate-spin')} aria-hidden="true" />}
               disabled={sync.isPending}
@@ -124,6 +133,12 @@ export function AccountsClient() {
           )}
         </div>
       </div>
+
+      {data?.canManage && !data.metaConfigured && (
+        <div className="rounded-xl border border-amber-300/25 bg-amber-300/10 px-4 py-3 text-sm text-amber-100">
+          Login 1-klik Meta belum aktif karena <code>META_APP_ID</code> dan <code>META_APP_SECRET</code> belum terpasang di server Railway.
+        </div>
+      )}
 
       {banner && (
         <p
@@ -163,14 +178,22 @@ export function AccountsClient() {
         </div>
       ) : data.accounts.length === 0 ? (
         <div className="glass rounded-2xl p-10 text-center">
-          <p className="text-sm text-muted">Belum ada akun media sosial di brand ini.</p>
-          {data.canManage && slug !== 'all' && (
-            <div className="mt-4 flex justify-center">
+          <p className="text-sm text-muted">Belum ada akun media sosial terhubung di brand ini.</p>
+          {data.canManage && activeBrandSlug && (
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              {data.metaConfigured && (
+                <KineticLink
+                  href={`/api/v1/oauth/meta/start?workspace=${activeBrandSlug}`}
+                  variant="primary"
+                  icon={<Link2 className="size-4" aria-hidden="true" />}
+                  label="Connect Meta (FB & IG)"
+                />
+              )}
               <KineticButton
-                variant="primary"
-                label="Add Account"
+                variant="ghost"
+                label="Add Sample Account"
                 icon={<Plus className="size-4" aria-hidden="true" />}
-                onClick={() => setAddAccountSlug(slug)}
+                onClick={() => setAddAccountSlug(activeBrandSlug)}
               />
             </div>
           )}
@@ -178,17 +201,28 @@ export function AccountsClient() {
       ) : (
         [...grouped.entries()].map(([workspaceName, group]) => (
           <section key={workspaceName} className="glass overflow-hidden rounded-2xl" aria-label={`${workspaceName} accounts`}>
-            <div className="flex items-center justify-between border-b border-line px-5 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line px-5 py-3">
               <h2 className="font-display text-sm font-bold text-ink">{workspaceName}</h2>
               {data.canManage && (
-                <button
-                  type="button"
-                  onClick={() => setAddAccountSlug(group.slug)}
-                  className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-1 text-xs font-medium text-muted transition-colors hover:bg-white/[0.06] hover:text-ink"
-                >
-                  <Plus className="size-3.5" aria-hidden="true" />
-                  Add account
-                </button>
+                <div className="flex items-center gap-2">
+                  {data.metaConfigured && (
+                    <a
+                      href={`/api/v1/oauth/meta/start?workspace=${group.slug}`}
+                      className="inline-flex items-center gap-1 rounded-md border border-emerald-400/30 bg-emerald-400/10 px-2.5 py-1 text-xs font-medium text-emerald-200 transition-colors hover:bg-emerald-400/20"
+                    >
+                      <Link2 className="size-3.5" aria-hidden="true" />
+                      Connect FB / IG
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setAddAccountSlug(group.slug)}
+                    className="inline-flex items-center gap-1 rounded-md border border-line px-2 py-1 text-xs font-medium text-muted transition-colors hover:bg-white/[0.06] hover:text-ink"
+                  >
+                    <Plus className="size-3.5" aria-hidden="true" />
+                    Add account
+                  </button>
+                </div>
               )}
             </div>
             <ul>
@@ -210,7 +244,7 @@ export function AccountsClient() {
                       <dd className="mt-0.5 font-medium text-ink">{STATUS_LABEL[a.status]}</dd>
                     </div>
                     <div>
-                      <dt className="text-faint">Token</dt>
+                      <dt className="text-faint">Connection</dt>
                       <dd className={clsx('mt-0.5 font-medium', HEALTH[a.tokenHealth].className)}>{HEALTH[a.tokenHealth].label}</dd>
                     </div>
                     <div>
@@ -225,20 +259,20 @@ export function AccountsClient() {
                     {data.canSync && (
                       <KineticButton label="Sync" disabled={sync.isPending} onClick={() => sync.mutate(a.id)} />
                     )}
-                    {data.canManage && (
-                      <KineticButton
-                        label="API / Token"
-                        icon={<KeyRound className="size-3.5" aria-hidden="true" />}
-                        onClick={() => setConfigAccount(a)}
-                      />
-                    )}
-                    {data.canManage && a.liveCapable && data.metaConfigured && (
-                      <KineticLink
-                        href={`/api/v1/oauth/meta/start?workspace=${a.workspaceSlug}`}
-                        icon={<Link2 className="size-4" aria-hidden="true" />}
-                        label={a.mode === 'live' ? 'Reconnect OAuth' : 'OAuth Meta'}
-                      />
-                    )}
+                    {data.canManage &&
+                      (a.liveCapable ? (
+                        data.metaConfigured ? (
+                          <KineticLink
+                            href={`/api/v1/oauth/meta/start?workspace=${a.workspaceSlug}`}
+                            icon={<Link2 className="size-4" aria-hidden="true" />}
+                            label={a.mode === 'live' && a.status === 'active' ? 'Reconnect' : 'Login Meta'}
+                          />
+                        ) : (
+                          <span className="text-xs text-faint">Meta OAuth not configured</span>
+                        )
+                      ) : (
+                        <span className="text-xs text-faint">{PLATFORM_META[a.platform].label} OAuth pending app review</span>
+                      ))}
                   </div>
                 </li>
               ))}
@@ -263,17 +297,6 @@ export function AccountsClient() {
         onClose={() => setAddAccountSlug(null)}
         onCreated={() => {
           setAddAccountSlug(null);
-          void queryClient.invalidateQueries({ queryKey: ['accounts'] });
-          void queryClient.invalidateQueries({ queryKey: ['overview'] });
-          void queryClient.invalidateQueries({ queryKey: ['posts'] });
-        }}
-      />
-
-      <CredentialsModal
-        account={configAccount}
-        onClose={() => setConfigAccount(null)}
-        onSaved={() => {
-          setConfigAccount(null);
           void queryClient.invalidateQueries({ queryKey: ['accounts'] });
           void queryClient.invalidateQueries({ queryKey: ['overview'] });
           void queryClient.invalidateQueries({ queryKey: ['posts'] });
@@ -367,7 +390,7 @@ function NewBrandModal({
       open={open}
       onClose={onClose}
       title="Add new brand"
-      description="Brand baru akan muncul di Workspace Switcher dan bisa menampung akun sosmednya sendiri."
+      description="Brand baru akan muncul di Workspace Switcher dan bisa dihubungkan ke akun sosmednya sendiri."
     >
       <form
         onSubmit={(e: FormEvent) => {
@@ -451,12 +474,9 @@ function AddAccountModal({
   onCreated: () => void;
 }) {
   const [targetSlug, setTargetSlug] = useState(workspaceSlug ?? workspaces[0]?.slug ?? '');
-  const [platform, setPlatform] = useState<Platform>('instagram');
+  const [platform, setPlatform] = useState<Platform>('tiktok');
   const [handle, setHandle] = useState('');
   const [displayName, setDisplayName] = useState('');
-  const [mode, setMode] = useState<'mock' | 'live'>('mock');
-  const [platformAccountId, setPlatformAccountId] = useState('');
-  const [accessToken, setAccessToken] = useState('');
 
   const effectiveSlug = workspaceSlug && workspaces.some((w) => w.slug === targetSlug) ? targetSlug : (workspaceSlug ?? '');
 
@@ -466,16 +486,11 @@ function AddAccountModal({
         platform,
         handle,
         displayName: displayName || handle,
-        mode,
-        platformAccountId: platformAccountId || undefined,
-        accessToken: accessToken || undefined,
+        mode: 'mock',
       }),
     onSuccess: () => {
       setHandle('');
       setDisplayName('');
-      setPlatformAccountId('');
-      setAccessToken('');
-      setMode('mock');
       onCreated();
     },
   });
@@ -484,8 +499,8 @@ function AddAccountModal({
     <ModalShell
       open={workspaceSlug !== null}
       onClose={onClose}
-      title="Add social account"
-      description="Tambahkan akun media sosial baru ke brand. Bisa langsung pakai token API (Live) atau Mock dulu."
+      title="Add social account (sandbox)"
+      description="Untuk Facebook & Instagram gunakan tombol Connect Meta (login 1-klik). Form ini untuk akun sandbox TikTok, X, atau Threads."
     >
       <form
         onSubmit={(e: FormEvent) => {
@@ -546,41 +561,6 @@ function AddAccountModal({
             />
           </div>
         </div>
-        <div>
-          <label className="text-xs font-semibold uppercase tracking-wider text-faint">Adapter Mode</label>
-          <select
-            value={mode}
-            onChange={(e) => setMode(e.target.value as 'mock' | 'live')}
-            className="mt-1.5 w-full rounded-lg border border-line bg-[#101117] px-3 py-2 text-sm text-ink"
-          >
-            <option value="mock">Mock Adapter (Sample Feed)</option>
-            <option value="live">Live API (Pakai Access Token)</option>
-          </select>
-        </div>
-        {mode === 'live' && (
-          <div className="space-y-3 rounded-xl border border-line bg-white/[0.02] p-3">
-            <div>
-              <label className="text-xs font-semibold uppercase tracking-wider text-faint">Platform Account / Page ID</label>
-              <input
-                value={platformAccountId}
-                onChange={(e) => setPlatformAccountId(e.target.value)}
-                placeholder="17841400..."
-                className="mt-1 w-full rounded-lg border border-line bg-white/[0.04] px-3 py-2 font-mono text-xs text-ink"
-              />
-            </div>
-            <div>
-              <label className="text-xs font-semibold uppercase tracking-wider text-faint">Access Token</label>
-              <input
-                required
-                type="password"
-                value={accessToken}
-                onChange={(e) => setAccessToken(e.target.value)}
-                placeholder="EAAG..."
-                className="mt-1 w-full rounded-lg border border-line bg-white/[0.04] px-3 py-2 font-mono text-xs text-ink"
-              />
-            </div>
-          </div>
-        )}
         {mutation.isError && (
           <p role="alert" className="text-xs text-rose-300">
             {mutation.error instanceof Error ? mutation.error.message : 'Gagal menambah akun'}
@@ -589,106 +569,6 @@ function AddAccountModal({
         <div className="flex justify-end gap-2 pt-2">
           <KineticButton label="Cancel" onClick={onClose} />
           <KineticButton type="submit" variant="primary" label={mutation.isPending ? 'Adding...' : 'Add Account'} disabled={mutation.isPending} />
-        </div>
-      </form>
-    </ModalShell>
-  );
-}
-
-function CredentialsModal({
-  account,
-  onClose,
-  onSaved,
-}: {
-  account: AccountRow | null;
-  onClose: () => void;
-  onSaved: () => void;
-}) {
-  const [mode, setMode] = useState<'live' | 'mock'>(account?.mode ?? 'live');
-  const [platformAccountId, setPlatformAccountId] = useState('');
-  const [accessToken, setAccessToken] = useState('');
-  const [refreshToken, setRefreshToken] = useState('');
-
-  const mutation = useMutation({
-    mutationFn: () =>
-      apiSend(`/api/v1/accounts/${account!.id}/credentials`, 'PATCH', {
-        mode,
-        platformAccountId: platformAccountId || undefined,
-        accessToken: accessToken || undefined,
-        refreshToken: refreshToken || undefined,
-        expiresInDays: 60,
-        triggerSync: true,
-      }),
-    onSuccess: () => {
-      setPlatformAccountId('');
-      setAccessToken('');
-      setRefreshToken('');
-      onSaved();
-    },
-  });
-
-  return (
-    <ModalShell
-      open={account !== null}
-      onClose={onClose}
-      title={account ? `API & Token: @${account.handle}` : 'API & Token'}
-      description="Token disimpan terenkripsi AES-256-GCM di database. Setelah disimpan, sistem langsung menjalankan sync."
-    >
-      <form
-        onSubmit={(e: FormEvent) => {
-          e.preventDefault();
-          mutation.mutate();
-        }}
-        className="space-y-4"
-      >
-        <div>
-          <label className="text-xs font-semibold uppercase tracking-wider text-faint">Data Source Mode</label>
-          <select
-            value={mode}
-            onChange={(e) => setMode(e.target.value as 'live' | 'mock')}
-            className="mt-1.5 w-full rounded-lg border border-line bg-[#101117] px-3 py-2 text-sm text-ink"
-          >
-            <option value="live">LIVE API (Official Platform Data)</option>
-            <option value="mock">MOCK ADAPTER (Sample Data)</option>
-          </select>
-        </div>
-        <div>
-          <label className="text-xs font-semibold uppercase tracking-wider text-faint">Platform Account / Page ID (opsional)</label>
-          <input
-            value={platformAccountId}
-            onChange={(e) => setPlatformAccountId(e.target.value)}
-            placeholder="Kosongkan jika tidak berubah"
-            className="mt-1.5 w-full rounded-lg border border-line bg-white/[0.04] px-3 py-2 font-mono text-xs text-ink"
-          />
-        </div>
-        <div>
-          <label className="text-xs font-semibold uppercase tracking-wider text-faint">Access Token</label>
-          <input
-            type="password"
-            value={accessToken}
-            onChange={(e) => setAccessToken(e.target.value)}
-            placeholder="Tempel Long-Lived Access Token di sini"
-            className="mt-1.5 w-full rounded-lg border border-line bg-white/[0.04] px-3 py-2 font-mono text-xs text-ink"
-          />
-        </div>
-        <div>
-          <label className="text-xs font-semibold uppercase tracking-wider text-faint">Refresh / User Token (opsional)</label>
-          <input
-            type="password"
-            value={refreshToken}
-            onChange={(e) => setRefreshToken(e.target.value)}
-            placeholder="Opsional untuk auto-refresh"
-            className="mt-1.5 w-full rounded-lg border border-line bg-white/[0.04] px-3 py-2 font-mono text-xs text-ink"
-          />
-        </div>
-        {mutation.isError && (
-          <p role="alert" className="text-xs text-rose-300">
-            {mutation.error instanceof Error ? mutation.error.message : 'Gagal menyimpan kredensial'}
-          </p>
-        )}
-        <div className="flex justify-end gap-2 pt-2">
-          <KineticButton label="Cancel" onClick={onClose} />
-          <KineticButton type="submit" variant="primary" label={mutation.isPending ? 'Saving...' : 'Save & Sync'} disabled={mutation.isPending} />
         </div>
       </form>
     </ModalShell>
