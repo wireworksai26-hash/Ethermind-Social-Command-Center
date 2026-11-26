@@ -3,7 +3,7 @@
 import * as Dialog from '@radix-ui/react-dialog';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import clsx from 'clsx';
-import { Building2, Link2, Plus, RefreshCw, X } from 'lucide-react';
+import { Building2, Link2, Plus, RefreshCw, Trash2, X } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { useState, type FormEvent } from 'react';
 import { apiGet, apiSend } from '@/lib/client/api';
@@ -69,6 +69,15 @@ export function AccountsClient() {
         void queryClient.invalidateQueries({ queryKey: ['overview'] });
         void queryClient.invalidateQueries({ queryKey: ['posts'] });
       }, delay);
+    },
+  });
+
+  const removeAccount = useMutation({
+    mutationFn: (accountId: string) => apiSend(`/api/v1/accounts/${accountId}`, 'DELETE'),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ['accounts'] });
+      void queryClient.invalidateQueries({ queryKey: ['overview'] });
+      void queryClient.invalidateQueries({ queryKey: ['posts'] });
     },
   });
 
@@ -273,6 +282,22 @@ export function AccountsClient() {
                       ) : (
                         <span className="text-xs text-faint">{PLATFORM_META[a.platform].label} OAuth pending app review</span>
                       ))}
+                    {data.canManage && (
+                      <button
+                        type="button"
+                        disabled={removeAccount.isPending}
+                        onClick={() => {
+                          if (window.confirm(`Hapus akun @${a.handle} (${a.platform}) beserta datanya dari dashboard?`)) {
+                            removeAccount.mutate(a.id);
+                          }
+                        }}
+                        title={`Hapus akun @${a.handle}`}
+                        aria-label={`Hapus akun @${a.handle}`}
+                        className="inline-flex size-9 items-center justify-center rounded-lg border border-line text-muted transition-colors hover:border-rose-400/40 hover:text-rose-300 disabled:opacity-40"
+                      >
+                        <Trash2 className="size-4" />
+                      </button>
+                    )}
                   </div>
                 </li>
               ))}
