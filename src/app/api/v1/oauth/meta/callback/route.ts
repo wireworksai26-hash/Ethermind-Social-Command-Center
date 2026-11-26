@@ -11,11 +11,19 @@ import { syncAccount } from '@/lib/sync';
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
 
+interface GraphIgAccount {
+  id: string;
+  username?: string;
+  name?: string;
+  profile_picture_url?: string;
+}
+
 interface GraphPage {
   id: string;
   name: string;
   access_token: string;
-  instagram_business_account?: { id: string; username?: string; name?: string; profile_picture_url?: string };
+  instagram_business_account?: GraphIgAccount;
+  connected_instagram_account?: GraphIgAccount;
 }
 
 async function graphGet<T>(path: string, params: Record<string, string>): Promise<T> {
@@ -146,8 +154,18 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
 
     const pages = await graphGet<{ data: GraphPage[] }>('me/accounts', {
       access_token: long.access_token,
-      fields: 'id,name,access_token,instagram_business_account{id,username,name,profile_picture_url}',
+      fields:
+        'id,name,access_token,instagram_business_account{id,username,name,profile_picture_url},connected_instagram_account{id,username,name,profile_picture_url}',
     });
+    console.info(
+      '[oauth:meta] pages resolved:',
+      pages.data.map((p) => ({
+        pageId: p.id,
+        name: p.name,
+        igBusiness: p.instagram_business_account?.id ?? null,
+        igConnected: p.connected_instagram_account?.id ?? null,
+      })),
+    );
 
     const accountIds: string[] = [];
     for (const page of pages.data) {
@@ -164,7 +182,7 @@ export async function GET(req: NextRequest): Promise<NextResponse> {
           expiresAt,
         }),
       );
-      const ig = page.instagram_business_account;
+      const ig = page.instagram_business_account ?? page.connected_instagram_account;
       if (ig) {
         accountIds.push(
           await upsertLiveAccount({
